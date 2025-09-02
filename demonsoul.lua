@@ -2,6 +2,7 @@
 -- ✅ Auto Raid (chạy bộ bám boss)
 -- ✅ Auto Attack thường
 -- ✅ Auto Skill 3 spam
+-- ✅ Auto Speed (85 khi bật, 16 khi tắt)
 -- ✅ Anti AFK (ngầm, không vào menu)
 
 -- // Load Rayfield UI
@@ -39,6 +40,9 @@ local Window = Rayfield:CreateWindow({
 local MainTab = Window:CreateTab("⚔️ Main", nil)
 local RaidSection = MainTab:CreateSection("Raid Farm")
 local CombatSection = MainTab:CreateSection("Combat")
+local MoveSection = MainTab:CreateSection("Movement")
+local TeleportSection = MainTab:CreateSection("Teleport")
+local MiscSection = MainTab:CreateSection("Misc")
 
 -- // Anti AFK ngầm
 task.spawn(function()
@@ -123,21 +127,15 @@ local function chaseTarget(boss, stopDist)
     end
 end
 
--- ========== TOGGLE ==========
-local AutoRaid = false
-local AutoAttack = false
-local AutoSkill3 = false
-
+-- ========== TOGGLES ==========
 -- Auto Raid
 MainTab:CreateToggle({
     Name = "Auto Raid Farm",
     CurrentValue = false,
-    Flag = "AutoRaid",
     Callback = function(v)
-        AutoRaid = v
         if v then
             task.spawn(function()
-                while AutoRaid do
+                while v do
                     local alive = getAliveBosses()
                     if #alive > 0 then
                         local target = alive[1]
@@ -154,16 +152,14 @@ MainTab:CreateToggle({
     end
 })
 
--- Auto Attack thường
+-- Auto Attack
 MainTab:CreateToggle({
     Name = "Auto Attack",
     CurrentValue = false,
-    Flag = "AutoAttack",
     Callback = function(v)
-        AutoAttack = v
         if v then
             task.spawn(function()
-                while AutoAttack do
+                while v do
                     RemoteEvents.GeneralAttack:FireServer(2)
                     task.wait()
                 end
@@ -176,12 +172,10 @@ MainTab:CreateToggle({
 MainTab:CreateToggle({
     Name = "Auto Skill 3",
     CurrentValue = false,
-    Flag = "AutoSkill3",
     Callback = function(v)
-        AutoSkill3 = v
         if v then
             task.spawn(function()
-                while AutoSkill3 do
+                while v do
                     RemoteEvents.SkillAttack:FireServer(3)
                     task.wait()
                 end
@@ -189,3 +183,25 @@ MainTab:CreateToggle({
         end
     end
 })
+
+-- Auto Speed (85 khi bật, 16 khi tắt)
+MainTab:CreateToggle({
+    Name = "Auto Speed (85)",
+    CurrentValue = false,
+    Callback = function(v)
+        local humanoid = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = v and 85 or 16
+        end
+    end
+})
+
+-- ========== Teleport (mẫu) ==========
+TeleportSection:CreateButton({Name = "Teleport A", Callback = function() print("TP A") end})
+TeleportSection:CreateButton({Name = "Teleport B", Callback = function() print("TP B") end})
+TeleportSection:CreateButton({Name = "Teleport C", Callback = function() print("TP C") end})
+
+-- ========== Misc (mẫu) ==========
+MiscSection:CreateButton({Name = "Misc A", Callback = function() print("Misc A") end})
+MiscSection:CreateButton({Name = "Misc B", Callback = function() print("Misc B") end})
+MiscSection:CreateButton({Name = "Misc C", Callback = function() print("Misc C") end})
