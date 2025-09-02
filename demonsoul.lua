@@ -25,10 +25,17 @@ local Window = Rayfield:CreateWindow({
         FolderName = nil,
         FileName = "DemonSoulHub"
     },
+     Discord = {
+      Enabled = false,
+      Invite = "https://discord.com/users/dqtn382",
+      RememberJoins = true
+   },
+
     KeySystem = true,
     KeySettings = {
         Title = "Key | Demon Soul",
         Subtitle = "Key System",
+        Note = "Buy Key In My Disord",
         FileName = "demonhub_key",
         SaveKey = false,
         GrabKeyFromSite = false,
