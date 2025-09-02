@@ -26,7 +26,7 @@ local Window = Rayfield:CreateWindow({
     },
     KeySystem = true,
     KeySettings = {
-        Title = "Key | Demon Soul Hub",
+        Title = "Key | Demon Soul",
         Subtitle = "Key System",
         FileName = "demonhub_key",
         SaveKey = false,
