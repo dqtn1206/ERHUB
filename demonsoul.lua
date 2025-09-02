@@ -10,15 +10,15 @@ local success, Rayfield = pcall(function()
     return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 end)
 if not success then
-    warn("❌ Failed to load Rayfield UI: ", Rayfield)
+    warn("❌ Failed to load UI: ", Rayfield)
     return
 end
-print("✅ Rayfield UI loaded")
+
 
 -- // Key System
 local Window = Rayfield:CreateWindow({
-    Name = "🔥ER HUB | Demon Soul",
-    LoadingTitle = "Demon Soul Auto Hub",
+    Name = "🔥 ER HUB | Demon Soul",
+    LoadingTitle = "ER HUB | Demon Soul",
     LoadingSubtitle = "by Nguyên",
     ConfigurationSaving = {
         Enabled = false,
