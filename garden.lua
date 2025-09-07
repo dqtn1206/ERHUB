@@ -155,7 +155,9 @@ local function CheckEntitiesAndReturnToLobby()
     task.spawn(function()
         local EntitiesFolder = workspace:FindFirstChild('Map')
             and workspace.Map:FindFirstChild('Entities')
-        if not EntitiesFolder then return end
+        if not EntitiesFolder then
+            return
+        end
 
         local emptyTime = 0
 
@@ -163,7 +165,7 @@ local function CheckEntitiesAndReturnToLobby()
             if IsInFarm() then
                 local validEntities = {}
                 for _, entity in ipairs(EntitiesFolder:GetChildren()) do
-                    if entity.Name ~= "unit_pineapple" then
+                    if entity.Name ~= 'unit_pineapple' then
                         table.insert(validEntities, entity)
                     end
                 end
@@ -172,8 +174,12 @@ local function CheckEntitiesAndReturnToLobby()
                     emptyTime += 1
                     if emptyTime >= 25 then
                         pcall(function()
-                            local RemoteFunctions = ReplicatedStorage:WaitForChild('RemoteFunctions')
-                            local BackToMainLobby = RemoteFunctions:WaitForChild('BackToMainLobby')
+                            local RemoteFunctions =
+                                ReplicatedStorage:WaitForChild(
+                                    'RemoteFunctions'
+                                )
+                            local BackToMainLobby =
+                                RemoteFunctions:WaitForChild('BackToMainLobby')
                             BackToMainLobby:InvokeServer()
                         end)
                         emptyTime = 0
@@ -302,6 +308,74 @@ task.spawn(function()
         task.wait(2) -- Chờ 2 giây trước khi thử lại
     end
 end)
+
+-- Show info
+
+local Players = game:GetService('Players')
+local player = Players.LocalPlayer
+local PlayerGui = player:WaitForChild('PlayerGui')
+
+-- Tạo ScreenGui
+local screenGui = Instance.new('ScreenGui')
+screenGui.Name = 'FullGameOverlay'
+screenGui.ResetOnSpawn = false
+screenGui.Parent = PlayerGui
+
+-- Background mờ phủ toàn bộ game
+local background = Instance.new('Frame')
+background.Size = UDim2.new(1, 0, 1, 0) -- full screen
+background.Position = UDim2.new(0, 0, 0, 0)
+background.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- màu đen mờ
+background.BackgroundTransparency = 0.7 -- mờ vừa phải
+background.BorderSizePixel = 0
+background.Parent = screenGui
+
+-- Frame chứa tên + seed, căn giữa
+local infoFrame = Instance.new('Frame')
+infoFrame.Size = UDim2.new(0.4, 0, 0.2, 0)
+infoFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+infoFrame.Position = UDim2.new(0.5, 0, 0.5, 0) -- chính giữa màn hình
+infoFrame.BackgroundTransparency = 1
+infoFrame.Parent = background
+
+-- Tên acc
+local nameLabel = Instance.new('TextLabel')
+nameLabel.Size = UDim2.new(1, 0, 0.6, 0)
+nameLabel.Position = UDim2.new(0, 0, 0, 0)
+nameLabel.Text = player.Name
+nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+nameLabel.BackgroundTransparency = 1
+nameLabel.TextScaled = true
+nameLabel.Font = Enum.Font.GothamBlack
+nameLabel.TextStrokeTransparency = 0
+nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+nameLabel.TextYAlignment = Enum.TextYAlignment.Center
+nameLabel.Parent = infoFrame
+
+-- Seed acc
+local seedLabel = Instance.new('TextLabel')
+seedLabel.Size = UDim2.new(1, 0, 0.4, 0)
+seedLabel.Position = UDim2.new(0, 0, 0.6, 0)
+seedLabel.Text = 'Seeds: 0'
+seedLabel.TextColor3 = Color3.fromRGB(0, 255, 128)
+seedLabel.BackgroundTransparency = 1
+seedLabel.TextScaled = true
+seedLabel.Font = Enum.Font.GothamBold
+seedLabel.TextStrokeTransparency = 0
+seedLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+seedLabel.TextXAlignment = Enum.TextXAlignment.Center
+seedLabel.TextYAlignment = Enum.TextYAlignment.Center
+seedLabel.Parent = infoFrame
+
+-- Cập nhật seed theo thời gian thực
+local leaderstats = player:WaitForChild('leaderstats')
+local seeds = leaderstats:WaitForChild('Seeds')
+
+seeds.Changed:Connect(function(value)
+    seedLabel.Text = 'Seeds: ' .. value
+end)
+seedLabel.Text = 'Seeds: ' .. seeds.Value
 
 ----------------------------------------------------------------
 -- Main loop
