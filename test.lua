@@ -40,9 +40,8 @@ local spawnPositions = {
 local unitPrice = 400
 local upgradePrices = {250, 350, 500, 850}
 
---// Params
-local UPGRADE_TIMEOUT = 15     -- nếu đợi quá 15s mà không nâng được -> bỏ qua
-local MAX_ATTEMPTS = 5         -- mỗi lần upgrade thử tối đa 5 lần
+local UPGRADE_TIMEOUT = 15
+local MAX_ATTEMPTS = 5
 
 local isRunning = false
 local lastResetState = false
@@ -69,7 +68,7 @@ local function waitForCash(amount, timeout)
 end
 
 ----------------------------------------------------------------
--- Đặt unit
+-- Đặt unit, trả về ID
 ----------------------------------------------------------------
 local function placeUnitAt(pos)
     if not waitForCash(unitPrice, 60) then return nil end
@@ -106,18 +105,15 @@ local function placeUnitAt(pos)
 end
 
 ----------------------------------------------------------------
--- Nâng unit 4 lần bằng đếm số lần upgrade thành công
+-- Nâng unit lên max (4 lần)
 ----------------------------------------------------------------
 local function upgradeUnitToMax(id)
-    local done = 0
     for i, cost in ipairs(upgradePrices) do
         if not waitForCash(cost, UPGRADE_TIMEOUT) then
             warn("Timeout tiền cho upgrade #" .. i)
             return false
         end
-
-        local attempts = 0
-        local success = false
+        local attempts, success = 0, false
         while attempts < MAX_ATTEMPTS do
             attempts += 1
             local ok = pcall(function()
@@ -134,42 +130,50 @@ local function upgradeUnitToMax(id)
             warn("Upgrade #" .. i .. " thất bại nhiều lần, bỏ unit.")
             return false
         end
-        done += 1
     end
-    return (done == #upgradePrices)
+    return true
 end
 
 ----------------------------------------------------------------
 -- Reset vòng mới
 ----------------------------------------------------------------
 local function isEntitiesResetIgnoringFarmers()
-    local children = Entities:GetChildren()
-    for _, c in ipairs(children) do
+    for _, c in ipairs(Entities:GetChildren()) do
         if c.Name ~= UNIT_NAME then return false end
     end
     return true
 end
 
 ----------------------------------------------------------------
--- Main loop
+-- Main: Đặt tất cả rồi nâng tất cả
 ----------------------------------------------------------------
 local function runPlacementPass()
     if isRunning then return end
     isRunning = true
     print("=== BẮT ĐẦU VÒNG MỚI ===")
 
+    -- Vòng 1: Đặt hết unit
+    local ids = {}
     for idx, pos in ipairs(spawnPositions) do
-        print(">>> Vị trí #" .. idx)
+        print(">>> Đặt unit tại vị trí #" .. idx)
         local id = placeUnitAt(pos)
-        if not id then
-            warn("Không đặt được unit tại #" .. idx)
+        if id then
+            print("Đặt thành công unit #" .. idx .. " với ID=" .. id)
+            table.insert(ids, id)
         else
-            local ok = upgradeUnitToMax(id)
-            if ok then
-                print("Unit #" .. idx .. " nâng max thành công")
-            else
-                warn("Unit #" .. idx .. " chưa max, chuyển vị trí kế")
-            end
+            warn("Không đặt được unit #" .. idx)
+        end
+        task.wait(0.5)
+    end
+
+    -- Vòng 2: Nâng lần lượt theo thứ tự ID
+    for idx, id in ipairs(ids) do
+        print(">>> Nâng unit #" .. idx .. " ID=" .. id)
+        local ok = upgradeUnitToMax(id)
+        if ok then
+            print("Unit #" .. idx .. " đã nâng max.")
+        else
+            warn("Unit #" .. idx .. " bị lỗi nâng, bỏ qua.")
         end
         task.wait(0.5)
     end
