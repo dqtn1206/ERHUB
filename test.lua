@@ -38,7 +38,7 @@ local spawnPositions = {
 }
 
 -- Giá có thể điều chỉnh theo game của bạn:
-local unitPrice = 400
+local unitPrice = 200
 local upgradePrices = {250, 350, 500, 850} -- 4 lần = max
 
 -- Retry / an toàn mạng
