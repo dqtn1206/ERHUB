@@ -1,4 +1,4 @@
--- === Time-based placer — dùng đúng timer path bạn cung cấp ===
+-- === Đặt unit_log_roller lúc 10s theo Timer IconLabel (path bạn đã xác nhận) ===
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -6,7 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- ===== 1) TIMER LABEL (đường dẫn bạn xác nhận) =====
+-- TIMER LABEL (đường dẫn UI đúng)
 local TimerLabel = playerGui
     :WaitForChild("TopbarStandard")
     :WaitForChild("Holders")
@@ -19,29 +19,28 @@ local TimerLabel = playerGui
     :WaitForChild("IconLabelContainer")
     :WaitForChild("IconLabel")
 
--- ===== 2) CONFIG =====
-local TARGET_SECONDS = 10            -- mốc bạn muốn đặt
-local COUNT_MODE = "auto"            -- "auto" | "up" | "down"
-local LOG_INTERVAL = 0.5
+-- Mốc thời gian
+local TARGET_SECONDS = 10
+local COUNT_MODE = "auto"         -- "auto" | "up" | "down"
 
--- Unit + args bạn đưa
+-- ARGS MỚI (PathIndex=3, vị trí/CF mới)
 local UNIT_NAME = "unit_log_roller"
-local POS = Vector3.new(-305.38128662109375, 61.93030548095703, -163.8728485107422)
-local CF  = CFrame.new(-305.38128662109375, 61.93030548095703, -163.8728485107422, -1, 0, 0, 0, 1, 0, 0, 0, -1)
-local PATH_INDEX = 1
-local DIST_ALONG = 100.32081599071108
+local PATH_INDEX = 3
+local POS = Vector3.new(-857.3809814453125, 62.18030548095703, -130.04051208496094)
+local CF  = CFrame.new(-857.3809814453125, 62.18030548095703, -130.04051208496094, 1, 0, -0, -0, 1, -0, -0, 0, 1)
+local DIST_ALONG = 227.5109100341797
 local ROT = 180
 
--- ===== 3) Utils: tách & parse thời gian =====
+local PlaceUnit = ReplicatedStorage:WaitForChild("RemoteFunctions"):WaitForChild("PlaceUnit")
+
+-- ===== Parse timer =====
 local function extractTimeText(s)
     if typeof(s) ~= "string" then return nil end
-    -- lấy đoạn có định dạng thời gian CUỐI cùng trong chuỗi (icon/space ở trước vẫn ok)
     local last
     for h,m,ss in s:gmatch("(%d+):(%d+):(%d+)") do last = string.format("%s:%s:%s", h,m,ss) end
     if last then return last end
     for m,ss in s:gmatch("(%d+):(%d%d)") do last = string.format("%s:%s", m,ss) end
     if last then return last end
-    -- fallback: chỉ số (vd "10")
     last = s:match("(%d+)")
     return last
 end
@@ -57,15 +56,12 @@ end
 
 local function readTimer()
     local raw = TimerLabel.Text
-    local tt  = extractTimeText(raw)
-    local sec = toSeconds(tt)
-    return raw, sec
+    local tt = extractTimeText(raw)
+    return raw, toSeconds(tt)
 end
 
--- ===== 4) Đặt unit một lần =====
-local PlaceUnit = ReplicatedStorage:WaitForChild("RemoteFunctions"):WaitForChild("PlaceUnit")
+-- ===== Đặt 1 lần =====
 local placed = false
-
 local function placeOnce()
     if placed then return end
     placed = true
@@ -84,26 +80,25 @@ local function placeOnce()
         PlaceUnit:InvokeServer(table.unpack(args))
     end)
     if ok then
-        warn(("[TimePlacer] >>> ĐÃ ĐẶT %s tại mốc %ds"):format(UNIT_NAME, TARGET_SECONDS))
+        warn(("[TimePlacer] >>> ĐÃ ĐẶT %s tại %ds (PathIndex=%d)"):format(UNIT_NAME, TARGET_SECONDS, PATH_INDEX))
     else
         warn("[TimePlacer] LỖI đặt unit:", err)
     end
 end
 
--- ===== 5) Log thời gian hiện tại + kích hoạt khi đạt mốc =====
+-- ===== Theo dõi timer + kích hoạt khi đạt mốc =====
 local lastSecs, mode
-warn("[TimePlacer] Theo dõi timer tại:", TimerLabel:GetFullName())
+print("[TimePlacer] Theo dõi:", TimerLabel:GetFullName())
 
--- log định kỳ để bạn thấy thời gian đang đọc
+-- log đều để bạn thấy thời gian hiện tại
 task.spawn(function()
     while not placed do
         local raw, sec = readTimer()
-        print(("[Timer] raw='%s'  ->  %s s"):format(tostring(raw), tostring(sec)))
-        task.wait(LOG_INTERVAL)
+        print(("[Timer] raw='%s' -> %s s"):format(tostring(raw), tostring(sec)))
+        task.wait(0.5)
     end
 end)
 
--- bám vào thay đổi Text để phát hiện chiều đếm & kích hoạt đặt
 TimerLabel:GetPropertyChangedSignal("Text"):Connect(function()
     local raw, sec = readTimer()
     if not sec then return end
@@ -125,7 +120,7 @@ TimerLabel:GetPropertyChangedSignal("Text"):Connect(function()
     lastSecs = sec
 end)
 
--- kickstart lần đầu để có mốc so sánh
+-- seed giá trị đầu
 do
     local _, s0 = readTimer()
     lastSecs = s0
