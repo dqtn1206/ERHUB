@@ -24,24 +24,24 @@ local TARGET_SECONDS = 10            -- mốc bạn muốn đặt
 local COUNT_MODE = "auto"            -- "auto" | "up" | "down"
 local LOG_INTERVAL = 0.5
 
--- ===== 3) ARGS MỚI (đã thay PathIndex/Position/CF/DistanceAlongPath) =====
-local UNIT_NAME  = "unit_log_roller"
-local PATH_INDEX = 3
-local POS        = Vector3.new(-857.3809814453125, 62.18030548095703, -130.04051208496094)
-local DIST_ALONG = 227.5109100341797
-local ROT        = 180
--- CF bạn đưa tương đương identity (hàng-cột 1,0,0 / 0,1,0 / 0,0,1).
--- Nếu muốn quay theo ROT, có thể để CF = CFrame.new(POS). Ở đây mình giữ đúng CF bạn gửi:
-local CF         = CFrame.new(-857.3809814453125, 62.18030548095703, -130.04051208496094, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+-- Unit + args bạn đưa
+local UNIT_NAME = "unit_log_roller"
+local POS = Vector3.new(-305.38128662109375, 61.93030548095703, -163.8728485107422)
+local CF  = CFrame.new(-305.38128662109375, 61.93030548095703, -163.8728485107422, -1, 0, 0, 0, 1, 0, 0, 0, -1)
+local PATH_INDEX = 1
+local DIST_ALONG = 100.32081599071108
+local ROT = 180
 
--- ===== 4) Utils: tách & parse thời gian =====
+-- ===== 3) Utils: tách & parse thời gian =====
 local function extractTimeText(s)
     if typeof(s) ~= "string" then return nil end
+    -- lấy đoạn có định dạng thời gian CUỐI cùng trong chuỗi (icon/space ở trước vẫn ok)
     local last
     for h,m,ss in s:gmatch("(%d+):(%d+):(%d+)") do last = string.format("%s:%s:%s", h,m,ss) end
     if last then return last end
     for m,ss in s:gmatch("(%d+):(%d%d)") do last = string.format("%s:%s", m,ss) end
     if last then return last end
+    -- fallback: chỉ số (vd "10")
     last = s:match("(%d+)")
     return last
 end
@@ -62,7 +62,7 @@ local function readTimer()
     return raw, sec
 end
 
--- ===== 5) Đặt unit một lần =====
+-- ===== 4) Đặt unit một lần =====
 local PlaceUnit = ReplicatedStorage:WaitForChild("RemoteFunctions"):WaitForChild("PlaceUnit")
 local placed = false
 
@@ -84,16 +84,17 @@ local function placeOnce()
         PlaceUnit:InvokeServer(table.unpack(args))
     end)
     if ok then
-        warn(("[TimePlacer] >>> ĐÃ ĐẶT %s tại mốc %ds (PathIndex=%d)"):format(UNIT_NAME, TARGET_SECONDS, PATH_INDEX))
+        warn(("[TimePlacer] >>> ĐÃ ĐẶT %s tại mốc %ds"):format(UNIT_NAME, TARGET_SECONDS))
     else
         warn("[TimePlacer] LỖI đặt unit:", err)
     end
 end
 
--- ===== 6) Log thời gian hiện tại + kích hoạt khi đạt mốc =====
+-- ===== 5) Log thời gian hiện tại + kích hoạt khi đạt mốc =====
 local lastSecs, mode
 warn("[TimePlacer] Theo dõi timer tại:", TimerLabel:GetFullName())
 
+-- log định kỳ để bạn thấy thời gian đang đọc
 task.spawn(function()
     while not placed do
         local raw, sec = readTimer()
@@ -102,6 +103,7 @@ task.spawn(function()
     end
 end)
 
+-- bám vào thay đổi Text để phát hiện chiều đếm & kích hoạt đặt
 TimerLabel:GetPropertyChangedSignal("Text"):Connect(function()
     local raw, sec = readTimer()
     if not sec then return end
@@ -123,7 +125,7 @@ TimerLabel:GetPropertyChangedSignal("Text"):Connect(function()
     lastSecs = sec
 end)
 
--- seed lần đầu để có mốc so sánh
+-- kickstart lần đầu để có mốc so sánh
 do
     local _, s0 = readTimer()
     lastSecs = s0
