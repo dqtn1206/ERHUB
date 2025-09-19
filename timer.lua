@@ -1,5 +1,4 @@
--- Debug đặt unit theo mốc thời gian UI + in log đầy đủ
--- by: bạn và mình ^^
+-- [TimePlacer] Bắt IconLabel timer + in thời gian hiện tại + đặt unit lúc 10s
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,13 +6,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
---========================
--- CONFIG MỐC THỜI GIAN
---========================
-local TARGET_SECONDS = 10            -- muốn đặt lúc 10s (nếu đếm lên). Nếu timer là đếm xuống, sẽ đặt khi <= 10s (tự phát hiện)
-local LOG_EVERY = 0.5                -- in log thời gian hiện tại mỗi X giây
+----------------------------------------------------------------
+-- 1) THAM SỐ
+----------------------------------------------------------------
+local TARGET_SECONDS = 10                 -- mốc cần đặt
+local COUNT_MODE = "auto"                 -- "auto" | "up" | "down" (mặc định tự phát hiện)
 
--- Unit args bạn đưa:
+-- Unit & args bạn đưa:
 local UNIT_NAME = "unit_log_roller"
 local POS = Vector3.new(-305.38128662109375, 61.93030548095703, -163.8728485107422)
 local CF  = CFrame.new(-305.38128662109375, 61.93030548095703, -163.8728485107422, -1, 0, -0, -0, 1, -0, -0, 0, -1)
@@ -21,11 +20,36 @@ local PATH_INDEX = 1
 local DIST_ALONG = 100.32081599071108
 local ROT = 180
 
-local PlaceUnit = ReplicatedStorage:WaitForChild("RemoteFunctions"):WaitForChild("PlaceUnit")
+----------------------------------------------------------------
+-- 2) LẤY ĐÚNG ICONLABEL (đường dẫn bạn đã tìm)
+----------------------------------------------------------------
+local function getTimerLabel()
+    local ok, label = pcall(function()
+        return playerGui
+            :WaitForChild("TopbarStandard")
+            :WaitForChild("Holders")
+            :WaitForChild("Right")
+            :WaitForChild("Widget")
+            :WaitForChild("IconButton")
+            :WaitForChild("Menu")
+            :WaitForChild("IconSpot")
+            :WaitForChild("Contents")
+            :WaitForChild("IconLabelContainer")
+            :WaitForChild("IconLabel")
+    end)
+    if ok and label then return label end
+    return nil
+end
 
---========================
--- HÀM TÌM & ĐỌC TIMER
---========================
+local TimerLabel = getTimerLabel()
+if not TimerLabel then
+    warn("[TimePlacer] Không tìm thấy IconLabel timer. Kiểm tra lại path trong getTimerLabel().")
+    return
+end
+
+----------------------------------------------------------------
+-- 3) PARSE TIME
+----------------------------------------------------------------
 local function extractTimeText(s)
     if typeof(s) ~= "string" then return nil end
     local last
@@ -46,27 +70,33 @@ local function parseToSeconds(t)
     return tonumber(t)
 end
 
--- Quét toàn bộ PlayerGui, lấy **đoạn thời gian mới nhất** tìm thấy + object chứa nó
-local function readTimerOnce()
-    local bestText, bestSecs, bestObj
-    for _, obj in ipairs(playerGui:GetDescendants()) do
-        local ok, text = pcall(function() return obj.Text end)
-        if ok and text then
-            local t = extractTimeText(text)
-            if t then
-                bestText = t
-                bestSecs = parseToSeconds(t)
-                bestObj = obj
-            end
-        end
-    end
-    return bestText, bestSecs, bestObj
+----------------------------------------------------------------
+-- 4) ĐỌC TIMER + LOG LIÊN TỤC
+----------------------------------------------------------------
+local lastSecs, mode
+local function readTimer()
+    local raw = TimerLabel.Text
+    local tText = extractTimeText(raw)
+    local secs = parseToSeconds(tText)
+    return raw, secs
 end
 
---========================
--- ĐẶT UNIT
---========================
+-- log đều để bạn thấy “thời gian hiện tại”
+task.spawn(function()
+    while true do
+        local raw, secs = readTimer()
+        print(("[Timer] raw='%s'  ->  %s giây  (mode=%s)")
+            :format(tostring(raw), tostring(secs), tostring(mode or "detecting")))
+        task.wait(0.5)
+    end
+end)
+
+----------------------------------------------------------------
+-- 5) ĐẶT UNIT KHI ĐỦ ĐIỀU KIỆN
+----------------------------------------------------------------
+local PlaceUnit = ReplicatedStorage:WaitForChild("RemoteFunctions"):WaitForChild("PlaceUnit")
 local placed = false
+
 local function placeOnce()
     if placed then return end
     placed = true
@@ -85,57 +115,46 @@ local function placeOnce()
         PlaceUnit:InvokeServer(table.unpack(args))
     end)
     if ok then
-        warn(("[TimePlacer] >>> ĐÃ ĐẶT %s tại mốc thời gian yêu cầu."):format(UNIT_NAME))
+        warn(("[TimePlacer] >>> ĐÃ ĐẶT %s tại mốc %ds."):format(UNIT_NAME, TARGET_SECONDS))
     else
-        warn("[TimePlacer] LỖI khi đặt unit:", err)
+        warn("[TimePlacer] LỖI đặt unit:", err)
     end
 end
 
---========================
--- MAIN LOOP + LOG
---========================
+----------------------------------------------------------------
+-- 6) MAIN LOOP: tự phát hiện đếm lên/đếm xuống & kích hoạt đặt
+----------------------------------------------------------------
 task.spawn(function()
-    warn(("[TimePlacer] Đang theo dõi timer… mục tiêu = %ds."):format(TARGET_SECONDS))
-    local lastSecs, lastText, lastObjPath = nil, nil, nil
-    local mode -- "up" = đếm lên, "down" = đếm xuống (tự phát hiện)
-    local lastLog = 0
+    warn(("[TimePlacer] Theo dõi IconLabel: %s"):format(TimerLabel:GetFullName()))
+    -- bám theo thay đổi Text
+    TimerLabel:GetPropertyChangedSignal("Text"):Connect(function()
+        local raw, secs = readTimer()
+        if not secs then return end
 
-    while not placed do
-        local text, secs, obj = readTimerOnce()
-
-        -- In log theo chu kỳ, cho bạn thấy **thời gian hiện tại** và **đường dẫn label**:
-        if os.clock() - lastLog >= LOG_EVERY then
-            if text and secs and obj then
-                local path = obj:GetFullName()
-                print(("[Timer] %s  ->  %ds   | %s"):format(text, secs, path))
-                lastObjPath = path
-            else
-                print("[Timer] (chưa bắt được timer từ UI) – vẫn quét…")
+        -- phát hiện mode
+        if COUNT_MODE == "auto" then
+            if lastSecs and not mode then
+                if secs > lastSecs then mode = "up"
+                elseif secs < lastSecs then mode = "down"
+                end
+                if mode then print("[TimePlacer] Detected mode =", mode) end
             end
-            lastLog = os.clock()
+        else
+            mode = COUNT_MODE
         end
 
-        -- Tự phát hiện timer đếm lên/đếm xuống khi có 2 mẫu liên tiếp
-        if secs and lastSecs then
-            if not mode then
-                if secs > lastSecs then mode = "up" elseif secs < lastSecs then mode = "down" end
-                if mode then print("[TimePlacer] Phát hiện chế độ timer:", mode) end
-            end
-        end
-
-        -- Điều kiện kích hoạt đặt:
-        -- - Nếu đếm **lên**: secs >= TARGET_SECONDS
-        -- - Nếu đếm **xuống**: secs <= TARGET_SECONDS
-        if secs then
+        -- điều kiện đặt
+        if not placed and mode then
             if (mode == "up" and secs >= TARGET_SECONDS) or (mode == "down" and secs <= TARGET_SECONDS) then
-                print(("[TimePlacer] Điều kiện đạt: timer=%ds (mode=%s). Tiến hành đặt…"):format(secs, tostring(mode or "?")))
+                print(("[TimePlacer] Điều kiện đạt: %ds (mode=%s), tiến hành đặt..."):format(secs, mode))
                 placeOnce()
-                break
             end
         end
 
-        lastSecs = secs or lastSecs
-        lastText = text or lastText
-        task.wait(0.1)
-    end
+        lastSecs = secs
+    end)
+
+    -- kích hoạt lần đầu để cập nhật lastSecs/mode sớm
+    local _, firstSecs = readTimer()
+    lastSecs = firstSecs
 end)
