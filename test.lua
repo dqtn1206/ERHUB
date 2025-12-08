@@ -267,7 +267,7 @@ task.spawn(function()
             runPlacementPass()
         end
         lastResetState = nowReset
-        task.wait(1)
+        task.wait(5)
     end
 end)
 
