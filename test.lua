@@ -1,30 +1,46 @@
---// Services
+--// ===== Auto Farmer 10 unit (place & upgrade 1->10) =====
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local WorkspaceService = game:GetService("Workspace")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+local workspace = game:GetService("Workspace")
 
---// Player
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
+----------------------------------------------------------------
+-- Wait for player / character / stats
+----------------------------------------------------------------
+local player
+repeat player = Players.LocalPlayer; task.wait() until player
+
+if not player.Character or not player.Character.Parent then
+    player.CharacterAdded:Wait()
+end
+
+local character = player.Character
 local humanoid = character:WaitForChild("Humanoid")
-local hrp = character:WaitForChild("HumanoidRootPart")
 local backpack = player:WaitForChild("Backpack")
-local leaderstats = player:WaitForChild("leaderstats")
-local cash = leaderstats:WaitForChild("Cash")
+local leaderstats = player:WaitForChild("leaderstats", 10)
+local cash = leaderstats:WaitForChild("Cash", 10)
 
---// Remotes & Map
-local RemoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions")
-local PlaceUnit = RemoteFunctions:WaitForChild("PlaceUnit")
-local UpgradeUnit = RemoteFunctions:WaitForChild("UpgradeUnit")
-local map = WorkspaceService:WaitForChild("Map")
-local Entities = map:WaitForChild("Entities")
+----------------------------------------------------------------
+-- Remotes / Map (chỉ chạy khi có Entities)
+----------------------------------------------------------------
+local RemoteFunctions = ReplicatedStorage:WaitForChild("RemoteFunctions", 10)
+local PlaceUnit      = RemoteFunctions:WaitForChild("PlaceUnit", 10)
+local UpgradeUnit    = RemoteFunctions:WaitForChild("UpgradeUnit", 10)
+local SellUnit       = RemoteFunctions:WaitForChild("SellUnit", 10) -- không dùng cũng không sao
 
---// Config
+local map = workspace:FindFirstChild("Map")
+if not map or not map:FindFirstChild("Entities") then
+    return
+end
+local Entities = map:WaitForChild("Entities", 10)
+
+----------------------------------------------------------------
+-- Config
+----------------------------------------------------------------
 local toolName = "Farmer"
-local UNIT_NAME = "unit_farmer_npc"
+local unitServerName = "unit_farmer_npc"
 
-local spawnPositions = {
+-- 10 Vị trí ĐẶT UNIT (cố định)
+local positions = {
     Vector3.new(-330.31, 65.17, -132.49),
     Vector3.new(-324.81, 65.17, -132.29),
     Vector3.new(-316.68, 65.17, -132.55),
@@ -37,253 +53,250 @@ local spawnPositions = {
     Vector3.new(-315.32, 65.17, -169.91),
 }
 
--- Giá có thể điều chỉnh theo game của bạn:
-local unitPrice = 200
-local upgradePrices = {250, 350, 500, 850} -- 4 lần = max
+local MAX_UNITS = #positions
 
--- Retry / an toàn mạng
-local MAX_ATTEMPTS_PER_CALL = 6
-local FIND_UNIT_TIMEOUT = 8   -- đợi model & ID xuất hiện sau PlaceUnit (giây)
+local placeCost   = 200
+-- 4 lần nâng = max, theo thứ tự giá
+local upgradeCost = {250, 350, 500, 850}  -- level 1,2,3,4
+local MAX_LEVEL   = #upgradeCost          -- 4
 
--- Trạng thái
-local isRunning = false
-local lastResetState = false
+local PLACEMENT_COOLDOWN = 1.0
+
+-- Vị trí đứng (tùy, mình cho gần khu farm)
+local STAND_POS       = Vector3.new(-320, 65.17, -150)
+local STAND_JITTER    = 1.0
+local APPROACH_RADIUS = 40
+local RETURN_TO_STAND = true
+
+----------------------------------------------------------------
+-- State
+----------------------------------------------------------------
+local nextIndex = 1            -- đơn vị tiếp theo cần đặt
+local busy, standingHere = false, false
+local lastPlaceTime = 0
+local standSpot = STAND_POS
+
+-- Lưu ID theo slot để upgrade
+local unitIds = {}
+local unitLevels = {}          -- số lần đã nâng của từng unit
+for i = 1, MAX_UNITS do
+    unitIds[i] = nil
+    unitLevels[i] = 0
+end
+
+local awaitingPlaceIndex = nil
+local currentUpgradeIndex = 1   -- đang upgrade unit thứ mấy (1 -> 10)
 
 ----------------------------------------------------------------
 -- Helpers
 ----------------------------------------------------------------
+local function parseCash(v)
+    if typeof(v) == "number" then return v end
+    if typeof(v) == "string" then
+        local s = v:gsub("[^%d%.-]", "")
+        return tonumber(s) or 0
+    end
+    return 0
+end
+local function getCash()
+    return parseCash(cash and cash.Value or 0)
+end
+
 local function getTool()
-    return backpack:FindFirstChild(toolName)
+    return backpack:FindFirstChild(toolName) or character:FindFirstChild(toolName)
 end
 
 local function moveTo(pos)
-    -- thêm chút jitter để tránh va chạm
-    local ox, oz = (math.random()-0.5)*2, (math.random()-0.5)*2
-    local target = Vector3.new(pos.X+ox, pos.Y, pos.Z+oz)
-    humanoid:MoveTo(target)
+    humanoid:MoveTo(pos)
     humanoid.MoveToFinished:Wait()
 end
 
--- Chờ đủ tiền (KHÔNG timeout) -> đảm bảo nâng tuần tự theo yêu cầu
-local function waitUntilCash(amount)
-    while (tonumber(cash.Value) or 0) < amount do
-        task.wait(0.1)
-    end
+local function jitterAround(v, r)
+    local ox = (math.random() - 0.5) * 2 * r
+    local oz = (math.random() - 0.5) * 2 * r
+    return Vector3.new(v.X + ox, v.Y, v.Z + oz)
 end
 
--- Lấy danh sách ID hiện có để tránh bắt nhầm unit cũ
-local function currentKnownIdsSet()
-    local set = {}
-    for _, child in ipairs(Entities:GetChildren()) do
-        local id = child:GetAttribute("ID")
-        if id then set[id] = true end
+local function goStandOnce()
+    if standingHere then return end
+    standSpot = jitterAround(STAND_POS, STAND_JITTER)
+    moveTo(standSpot)
+    standingHere = true
+end
+
+local function dist(a, b)
+    return (a - b).Magnitude
+end
+
+local function resetState()
+    nextIndex = 1
+    busy, standingHere = false, false
+    lastPlaceTime = 0
+    for i = 1, MAX_UNITS do
+        unitIds[i] = nil
+        unitLevels[i] = 0
     end
-    return set
+    currentUpgradeIndex = 1
+    task.defer(goStandOnce)
 end
 
 ----------------------------------------------------------------
--- Đặt unit tại vị trí, trả về ID (bắt ID chắc chắn)
+-- Bắt ID unit sau khi đặt
 ----------------------------------------------------------------
-local function placeUnitAt(pos)
-    -- chờ đủ tiền để đặt
-    waitUntilCash(unitPrice)
-
-    moveTo(pos)
-
-    local tool = getTool()
-    if not tool then
-        warn("[AutoUnit] Không có tool: " .. toolName)
-        return nil
+Entities.ChildAdded:Connect(function(child)
+    if child.Name ~= unitServerName then return end
+    if awaitingPlaceIndex and unitIds[awaitingPlaceIndex] == nil then
+        local idValue = child:GetAttribute("ID")
+        if idValue then
+            unitIds[awaitingPlaceIndex] = idValue
+        end
     end
+end)
 
-    -- snapshot các ID đã có trước khi đặt
-    local beforeSet = currentKnownIdsSet()
-
-    -- cầm tool
-    humanoid:EquipTool(tool)
-    task.wait(0.15)
-
-    -- gọi PlaceUnit (có retry)
-    local ok = false
-    for attempt = 1, MAX_ATTEMPTS_PER_CALL do
-        ok = pcall(function()
-            PlaceUnit:InvokeServer(
-                UNIT_NAME,
-                { Valid = true, Rotation = 180, CF = hrp.CFrame, Position = hrp.Position }
-            )
-        end)
-        if ok then break end
-        task.wait(0.2)
-    end
-
-    -- bỏ cầm tool ngay
-    humanoid:UnequipTools()
-
-    if not ok then
-        warn("[AutoUnit] PlaceUnit thất bại tại " .. tostring(pos))
-        return nil
-    end
-
-    -- đợi model mới + ID mới xuất hiện (không nằm trong beforeSet)
-    local deadline = tick() + FIND_UNIT_TIMEOUT
-    local newId = nil
-
-    -- ưu tiên nghe ChildAdded rồi chờ ID
-    local conn
-    conn = Entities.ChildAdded:Connect(function(child)
-        if child.Name == UNIT_NAME then
-            -- chờ attribute ID được set
-            local subDeadline = tick() + 5
-            repeat
-                local id = child:GetAttribute("ID")
-                if id and not beforeSet[id] then
-                    newId = id
-                    break
-                end
-                task.wait(0.05)
-            until tick() >= subDeadline
+-- Reset khi map sạch Entities (tùy game, nếu không muốn auto reset thì bỏ block này)
+Entities.ChildRemoved:Connect(function()
+    task.delay(1, function()
+        if #Entities:GetChildren() == 0 then
+            resetState()
         end
     end)
-
-    while not newId and tick() < deadline do
-        -- fallback quét toàn bộ (nếu missed sự kiện)
-        for _, child in ipairs(Entities:GetChildren()) do
-            if child.Name == UNIT_NAME then
-                local id = child:GetAttribute("ID")
-                if id and not beforeSet[id] then
-                    newId = id
-                    break
-                end
-            end
-        end
-        task.wait(0.05)
-    end
-    if conn then conn:Disconnect() end
-
-    if not newId then
-        warn("[AutoUnit] Không tìm thấy ID unit vừa đặt (có thể bị chặn/giới hạn).")
-        return nil
-    end
-
-    print(("[AutoUnit] Đặt xong ID=%s tại %s"):format(tostring(newId), tostring(pos)))
-    return newId
-end
-
-----------------------------------------------------------------
--- Nâng 1 unit lên max, CHỜ TIỀN TỚI KHI ĐỦ (tuần tự tuyệt đối)
-----------------------------------------------------------------
-local function upgradeUnitToMax_sequential(id)
-    if not id then return false end
-    for i, cost in ipairs(upgradePrices) do
-        -- CHỜ cho đủ tiền (không timeout) để đảm bảo tuần tự 1→2→… đúng ý bạn
-        print(("[AutoUnit] Chờ tiền để nâng #%d cho ID=%s (cần %d, hiện có %d)")
-            :format(i, tostring(id), cost, tonumber(cash.Value) or 0))
-        waitUntilCash(cost)
-
-        -- gọi Upgrade (retry nếu lỗi mạng)
-        local success = false
-        for attempt = 1, MAX_ATTEMPTS_PER_CALL do
-            local ok = pcall(function()
-                UpgradeUnit:InvokeServer(id)
-            end)
-            if ok then
-                success = true
-                print(("[AutoUnit] ✔ Nâng #%d thành công cho ID=%s (tiền còn %d)")
-                    :format(i, tostring(id), tonumber(cash.Value) or 0))
-                break
-            end
-            task.wait(0.2)
-        end
-
-        if not success then
-            warn(("[AutoUnit] ✖ Nâng #%d thất bại nhiều lần cho ID=%s -> bỏ unit này.")
-                :format(i, tostring(id)))
-            return false
-        end
-
-        task.wait(0.05)
-    end
-    return true
-end
-
-----------------------------------------------------------------
--- Reset vòng mới: Entities rỗng (trừ UNIT_NAME)
-----------------------------------------------------------------
-local function isEntitiesResetIgnoringFarmers()
-    for _, c in ipairs(Entities:GetChildren()) do
-        if c.Name ~= UNIT_NAME then
-            return false
-        end
-    end
-    return true
-end
-
-----------------------------------------------------------------
--- Main: ĐẶT TẤT CẢ → NÂNG TUẦN TỰ TỪ #1 → #N (mỗi unit max rồi mới sang unit kế)
-----------------------------------------------------------------
-local function runPlacementPass()
-    if isRunning then return end
-    isRunning = true
-    print("=== BẮT ĐẦU VÒNG MỚI ===")
-
-    -- Vòng 1: Đặt tất cả
-    local ids = {}
-    for idx, pos in ipairs(spawnPositions) do
-        print((">>> Đặt unit tại vị trí #%d"):format(idx))
-        local id = placeUnitAt(pos)
-        if id then
-            table.insert(ids, id)
-        else
-            warn(("Không đặt được unit tại #%d"):format(idx))
-        end
-        task.wait(0.25)
-    end
-
-    -- Vòng 2: Nâng TUẦN TỰ từ unit đầu tiên tới cuối cùng
-    for idx, id in ipairs(ids) do
-        print((">>> NÂNG unit #%d (ID=%s) lên MAX"):format(idx, tostring(id)))
-        local ok = upgradeUnitToMax_sequential(id)
-        if ok then
-            print(("Unit #%d (ID=%s) đã MAX"):format(idx, tostring(id)))
-        else
-            warn(("Unit #%d (ID=%s) lỗi nâng, bỏ qua."):format(idx, tostring(id)))
-        end
-        task.wait(0.2)
-    end
-
-    print("=== HOÀN TẤT VÒNG HIỆN TẠI ===")
-    isRunning = false
-end
-
-----------------------------------------------------------------
--- Watch reset
-----------------------------------------------------------------
-task.spawn(function()
-    lastResetState = isEntitiesResetIgnoringFarmers()
-    while true do
-        local nowReset = isEntitiesResetIgnoringFarmers()
-        if nowReset and not lastResetState and not isRunning then
-            print(">>> Phát hiện reset map -> chạy lại")
-            runPlacementPass()
-        end
-        lastResetState = nowReset
-        task.wait(5)
-    end
 end)
 
 ----------------------------------------------------------------
--- Anti AFK
+-- Đặt tuần tự 1 -> 10
+----------------------------------------------------------------
+local function placeNext()
+    if nextIndex > MAX_UNITS then return end
+    if (os.clock() - lastPlaceTime) < PLACEMENT_COOLDOWN then return end
+    if busy then return end
+    if getCash() < placeCost then return end
+
+    goStandOnce()
+
+    local tool = getTool()
+    if not tool then return end
+
+    busy = true
+    local idx = nextIndex
+    local targetPos = positions[idx]
+
+    local here = character.PrimaryPart and character.PrimaryPart.Position or standSpot
+    local needApproach = (dist(here, targetPos) > APPROACH_RADIUS)
+
+    local cameCloser = false
+    if needApproach then
+        moveTo(jitterAround(targetPos, 1.0))
+        cameCloser = true
+    end
+
+    humanoid:EquipTool(tool)
+    task.wait(0.05)
+
+    awaitingPlaceIndex = idx
+
+    local args = {
+        unitServerName,
+        {
+            Valid = true,
+            Rotation = 180,
+            Position = targetPos,
+            CF = CFrame.new(targetPos.X, targetPos.Y, targetPos.Z),
+            -- Nếu server không cần PathIndex / Distance thì để như này
+        }
+    }
+
+    local ok = pcall(function()
+        return PlaceUnit:InvokeServer(unpack(args))
+    end)
+
+    pcall(function()
+        humanoid:UnequipTools()
+    end)
+
+    if ok then
+        nextIndex = idx + 1
+        lastPlaceTime = os.clock()
+        task.wait(PLACEMENT_COOLDOWN)
+    end
+
+    if cameCloser and RETURN_TO_STAND then
+        moveTo(standSpot)
+    end
+
+    awaitingPlaceIndex = nil
+    busy = false
+end
+
+----------------------------------------------------------------
+-- Nâng cấp lần lượt unit 1 -> 10, mỗi unit nâng max 4 lần
+----------------------------------------------------------------
+local function upgradeUnitsSequential()
+    -- chỉ bắt đầu nâng khi đã đặt xong hết 10 con
+    if nextIndex <= MAX_UNITS then return end
+    if busy then return end
+    if currentUpgradeIndex > MAX_UNITS then return end -- đã nâng xong hết
+
+    local slot = currentUpgradeIndex
+    local unitId = unitIds[slot]
+    if not unitId then
+        -- chưa bắt được ID thì tạm bỏ qua
+        return
+    end
+
+    local currentLevel = unitLevels[slot]
+    if currentLevel >= MAX_LEVEL then
+        -- con này đã max, chuyển sang con kế
+        currentUpgradeIndex = currentUpgradeIndex + 1
+        return
+    end
+
+    local cost = upgradeCost[currentLevel + 1] or 0
+    if getCash() < cost then
+        return
+    end
+
+    busy = true
+    local ok = pcall(function()
+        return UpgradeUnit:InvokeServer(unitId)
+    end)
+    if ok then
+        unitLevels[slot] = currentLevel + 1
+        if unitLevels[slot] >= MAX_LEVEL then
+            currentUpgradeIndex = currentUpgradeIndex + 1
+        end
+    end
+    busy = false
+end
+
+----------------------------------------------------------------
+-- Anti-AFK
 ----------------------------------------------------------------
 task.spawn(function()
+    local VIM = game:GetService("VirtualInputManager")
     while true do
         pcall(function()
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+            VIM:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
             task.wait(0.1)
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+            VIM:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
         end)
-        task.wait(60)
+        task.wait(0.5)
     end
 end)
 
--- Chạy lần đầu
-task.spawn(runPlacementPass)
+----------------------------------------------------------------
+-- Driver
+----------------------------------------------------------------
+local function drive()
+    placeNext()             -- đặt 1 -> 10
+    upgradeUnitsSequential()-- nâng 1 max -> 2 max -> ... -> 10 max
+end
+
+goStandOnce()
+task.spawn(function()
+    while true do
+        drive()
+        task.wait(0.6)
+    end
+end)
+cash:GetPropertyChangedSignal("Value"):Connect(drive)
+drive()
